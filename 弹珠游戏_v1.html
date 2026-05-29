@@ -1,0 +1,1551 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>物理钢珠弹射游戏</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&display=swap" rel="stylesheet">
+    <!-- 引入 Matter.js 物理引擎 -->
+    <script src="https://unpkg.com/matter-js@0.20.0/build/matter.min.js"></script>
+    <!-- 倍率概率配置 -->
+    <script src="pachinko_config.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow-x: hidden;
+            overflow-y: auto;
+            background: #fdf6e3;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: 'Arial', sans-serif;
+            position: relative;
+            padding: 15px 0;
+            box-sizing: border-box;
+        }
+        canvas {
+            border: 2px solid #3b82f6;
+            border-radius: 120px 120px 0px 0px;
+        }
+        #gameContainer {
+            position: relative;
+            margin-right: 120px; /* 给右侧拉杆留出空间 */
+        }
+        /* Plunger 容器 */
+        #plungerHandleContainer {
+            position: absolute;
+            bottom: -220px;
+            left: 536px;
+            width: 60px;
+            height: 220px;
+            pointer-events: none;
+        }
+        /* Plunger 银色金属杆 */
+        #plungerRod {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            top: 0;
+            width: 10px;
+            height: 60px;
+            background: linear-gradient(to right, #94a3b8, #e2e8f0, #cbd5e1, #64748b);
+            border-radius: 5px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+        /* Plunger 红色把手 */
+        #plungerHandle {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            top: 60px;
+            width: 44px;
+            height: 44px;
+            background: linear-gradient(145deg, #ef4444, #dc2626, #b91c1c);
+            border-radius: 50%;
+            cursor: grab;
+            pointer-events: auto;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4), inset 0 2px 3px rgba(255,255,255,0.3);
+            transition: transform 0.1s ease;
+            user-select: none;
+        }
+        #plungerHandle:hover { transform: translateX(-50%) scale(1.08); }
+        #plungerHandle:active, #plungerHandle.dragging {
+            cursor: grabbing;
+            transform: translateX(-50%) scale(0.95);
+        }
+        /* 弹簧效果装饰 */
+        #spring {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            bottom: 0;
+            width: 20px;
+            height: 0%;
+            background: repeating-linear-gradient(
+                to top,
+                #64748b 0px,
+                #64748b 4px,
+                transparent 4px,
+                transparent 8px
+            );
+            opacity: 0.7;
+            transition: height 0.05s ease;
+        }
+        /* 力度数值显示 - 移到边界外 */
+        #powerDisplay {
+            position: absolute;
+            bottom: 300px;
+            right: -115px; /* 移到游戏容器外面 */
+            color: white;
+            font-size: 14px;
+            font-weight: bold;
+            text-align: center;
+            min-width: 90px;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 8px;
+            border-radius: 6px;
+        }
+        #powerValue {
+            color: #e94560;
+            font-size: 28px;
+            display: block;
+            margin-top: 4px;
+        }
+        /* 提示文字 - 移到边界外 */
+        #instruction {
+            position: absolute;
+            bottom: 20px;
+            right: -110px; /* 移到游戏容器外面 */
+            color: #94a3b8;
+            font-size: 12px;
+            text-align: center;
+            max-width: 100px;
+            line-height: 1.5;
+        }
+
+        /* ===== 投注面板 ===== */
+        #displayPanel {
+            background: linear-gradient(145deg, #2a2a4a, #1a1a2e);
+            border: 2px solid #4a4a6a;
+            border-radius: 12px;
+            padding: 12px 20px;
+            margin-bottom: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            min-width: 520px;
+            margin-right: 120px; /* 与gameContainer同步偏移，视觉居中于画布 */
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+            user-select: none;
+        }
+        .panel-row {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 16px;
+        }
+        .info-box {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-width: 80px;
+        }
+        .info-label {
+            color: #94a3b8;
+            font-size: 11px;
+            margin-bottom: 2px;
+        }
+        .info-value {
+            color: #f8fafc;
+            font-size: 22px;
+            font-weight: bold;
+        }
+        .gold-value { color: #eab308; }
+        .multiplier-value { color: #e94560; }
+
+        /* 电子屏样式 - 黑底红字 */
+        .digital-display {
+            display: inline-block;
+            background: #0a0a0a;
+            color: #ff1a1a;
+            font-family: 'Orbitron', 'Courier New', monospace;
+            font-size: 22px;
+            font-weight: bold;
+            padding: 4px 12px;
+            border: 2px solid #1a1a1a;
+            border-radius: 4px;
+            text-shadow: 0 0 10px rgba(255, 0, 0, 0.6);
+            box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.8);
+            min-width: 50px;
+            text-align: center;
+            letter-spacing: 2px;
+        }
+
+        #displayPanel button {
+            background: linear-gradient(145deg, #3b82f6, #2563eb);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 18px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+            user-select: none;
+        }
+        #displayPanel button:hover:not(:disabled) {
+            transform: scale(1.06);
+            box-shadow: 0 4px 14px rgba(59, 130, 246, 0.45);
+        }
+        #displayPanel button:active:not(:disabled) {
+            transform: scale(0.96);
+        }
+        #displayPanel button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .bet-btn {
+            background: linear-gradient(145deg, #6366f1, #4f46e5) !important;
+        }
+        .bet-btn:hover:not(:disabled) {
+            box-shadow: 0 4px 14px rgba(99, 102, 241, 0.45) !important;
+        }
+        .start-btn {
+            background: linear-gradient(145deg, #22c55e, #16a34a) !important;
+        }
+        .restart-btn {
+            background: linear-gradient(145deg, #e94560, #c73e54) !important;
+        }
+        .restart-btn:hover:not(:disabled) {
+            box-shadow: 0 4px 14px rgba(233, 69, 96, 0.45) !important;
+        }
+        .start-btn:hover:not(:disabled) {
+            box-shadow: 0 4px 14px rgba(34, 197, 94, 0.45) !important;
+        }
+
+        #resultMessage {
+            font-size: 16px;
+            font-weight: bold;
+            min-height: 22px;
+            text-align: center;
+            transition: color 0.3s ease;
+        }
+        /* 下方按钮面板 */
+        #bottomButtons {
+            position: absolute;
+            bottom: -30px;
+            right: 130px;
+            display: flex;
+            gap: 8px;
+            z-index: 10;
+        }
+        #bottomButtons button {
+            background: linear-gradient(145deg, #3b82f6, #2563eb);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            padding: 6px 12px;
+            font-size: 12px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+            user-select: none;
+            white-space: nowrap;
+        }
+        #bottomButtons button:hover:not(:disabled) {
+            transform: scale(1.06);
+            box-shadow: 0 4px 14px rgba(59, 130, 246, 0.45);
+        }
+        #bottomButtons button:active:not(:disabled) {
+            transform: scale(0.96);
+        }
+        #bottomButtons button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none;
+        }
+        #bottomButtons .bet-btn {
+            background: linear-gradient(145deg, #6366f1, #4f46e5) !important;
+        }
+        #bottomButtons .bet-btn:hover:not(:disabled) {
+            box-shadow: 0 4px 14px rgba(99, 102, 241, 0.45) !important;
+        }
+        #bottomButtons .start-btn {
+            background: linear-gradient(145deg, #22c55e, #16a34a) !important;
+        }
+        #bottomButtons .start-btn:hover:not(:disabled) {
+            box-shadow: 0 4px 14px rgba(34, 197, 94, 0.45) !important;
+        }
+        #bottomButtons .restart-btn {
+            background: linear-gradient(145deg, #e94560, #c73e54) !important;
+        }
+        #bottomButtons .restart-btn:hover:not(:disabled) {
+            box-shadow: 0 4px 14px rgba(233, 69, 96, 0.45) !important;
+        }
+    </style>
+</head>
+<body>
+    <!-- 投注面板 -->
+    <div id="displayPanel">
+        <div class="panel-row info-row">
+            <div class="info-box">
+                <span class="info-label">金币</span>
+                <span class="info-value gold-value" id="goldDisplay">100</span>
+            </div>
+            <div class="info-box">
+                <span class="info-label">当前投注</span>
+                <span class="info-value digital-display" id="betDisplay">0</span>
+            </div>
+            <div class="info-box">
+                <span class="info-label">倍率</span>
+                <span class="info-value multiplier-value" id="multiplierDisplay">--</span>
+            </div>
+            <div class="info-box">
+                <span class="info-label">预计奖励</span>
+                <span class="info-value digital-display" id="rewardDisplay">0</span>
+            </div>
+        </div>
+        <div class="panel-row message-row">
+            <span id="resultMessage"></span>
+        </div>
+    </div>
+
+    <div id="gameContainer">
+        <div id="bottomButtons">
+            <button id="btnRestart" class="restart-btn">重新开始</button>
+            <button id="btnBet1" class="bet-btn">加投 +2</button>
+            <button id="btnBet10" class="bet-btn">加投 +10</button>
+            <button id="btnStart" class="start-btn">开始游戏</button>
+        </div>
+        <canvas id="gameCanvas"></canvas>
+        
+        <!-- Plunger 拉杆系统 -->
+        <div id="plungerHandleContainer">
+            <div id="plungerRod"></div>
+            <div id="plungerHandle"></div>
+        </div>
+        
+        <!-- 力度显示 - 完全在游戏边界外 -->
+        <div id="powerDisplay">
+            发射力度
+            <span id="powerValue">0</span>
+        </div>
+        
+        <!-- 提示文字 - 完全在游戏边界外 -->
+        <div id="instruction">
+            向下拉动拉杆蓄力<br>
+            松手发射钢珠
+        </div>
+    </div>
+
+<script>
+    // ---------------------- 1. 初始化物理引擎核心 ----------------------
+    const Engine = Matter.Engine,
+          Render = Matter.Render,
+          Runner = Matter.Runner,
+          Bodies = Matter.Bodies,
+          Composite = Matter.Composite;
+
+    // 创建引擎（优化参数）
+    const engine = Engine.create({
+        positionIterations: 20,
+        velocityIterations: 20
+    });
+    const world = engine.world;
+
+    // ---------------------- 2. 游戏参数配置 ----------------------
+    const config = {
+        canvasHeight: 870,
+        ballRadius: 12,
+        pinRadius: 6,
+        wallPinRadius: 3,         // 靠墙钢钉半径
+        pinRows: 5,
+        pinsPerRow: 11,
+        gapSize: 6,
+        startY: 290, // +20
+        spacingY: 60,
+        wallThickness: 40,
+        wallGap: 3,               // 钉子离墙壁的间距
+        gravity: 1,
+        maxVelocity: 35,
+        maxPower: 2000,           // 最大力度
+        maxPullDistance: 150       // 最大拉动距离（像素）
+    };
+
+    // 设置重力
+    engine.world.gravity.y = config.gravity;
+
+    // 自动计算钢钉横向间距
+    config.spacingX = config.ballRadius * 2 + config.pinRadius * 2 + config.gapSize;
+
+    // ---------------------- 3. 精确计算布局坐标 ----------------------
+    const leftWallCenterX = config.wallThickness / 2;
+    // 第1/3/5排左侧间距 = wallGap
+    const leftmostPinCenterX = config.wallThickness + config.pinRadius + config.wallGap;
+    // 偶数行最后一颗钉子右端
+    const evenLastPinRight = leftmostPinCenterX + (config.pinsPerRow - 1) * config.spacingX + config.spacingX / 2 + config.pinRadius;
+    // 第2/4排右侧间距 = wallGap
+    const rightWallCenterX = evenLastPinRight + config.wallGap + config.wallThickness / 2;
+    const upperWallThickness = config.wallThickness / 4; // 1/4厚度
+    config.canvasWidth = rightWallCenterX + config.wallThickness / 2 + 40 + upperWallThickness + 10;
+
+    // ---------------------- 4. 创建渲染器 ----------------------
+    const render = Render.create({
+        canvas: document.getElementById('gameCanvas'),
+        engine: engine,
+        options: {
+            width: config.canvasWidth,
+            height: config.canvasHeight,
+            wireframes: false,
+            background: '#fdf6e3'
+        }
+    });
+
+    // ---------------------- 5. 创建边界 ----------------------
+    const wallOptions = { 
+        isStatic: true,
+        render: { fillStyle: '#4a4a6a' },
+        restitution: 0.8,
+        friction: 0.1,
+        density: 1
+    };
+
+    // 内墙坐标（墙壁分段需要）
+    const leftWallInner = leftWallCenterX + config.wallThickness / 2;
+    const rightWallInner = rightWallCenterX - config.wallThickness / 2;
+
+    const upperWallBottom = 220; // +20
+    const upperWallHeight = upperWallBottom;
+    const lowerWallHeight = config.canvasHeight - upperWallBottom;
+    const bufferY = config.startY - config.spacingY - 70; // 缓冲钉区Y坐标
+
+    // 以右墙下端为基准，从下往上定义
+    const trapHeight = 108; // 梯形高度（可调）
+    const oldWallTopY = upperWallBottom - trapHeight; // 梯形顶边 = 半圆底边
+
+    Composite.add(world, [
+        // 地板（中间开槽，金珠可从左侧滚落出界）
+        Bodies.rectangle(220, config.canvasHeight + config.wallThickness / 2, 440, config.wallThickness, wallOptions),
+        Bodies.rectangle((rightWallInner + config.canvasWidth) / 2, config.canvasHeight + config.wallThickness / 2, config.canvasWidth - rightWallInner, config.wallThickness, wallOptions),
+        Bodies.rectangle(config.canvasWidth/2, -config.wallThickness/2, config.canvasWidth, config.wallThickness, wallOptions),
+        // 顶部隐形防飞出墙（与左上圆弧厚度一致）
+        Bodies.rectangle(config.canvasWidth / 2, 7.5, config.canvasWidth, 15, {
+            isStatic: true, render: { visible: true }, restitution: 0.15, friction: 0
+        }),
+        // 左墙（合并为单一梯形：三角+下段，无接缝）
+        (() => {
+            const triH = upperWallBottom - bufferY;
+            const triArea = config.wallThickness * triH / 2;
+            const rectArea = config.wallThickness * lowerWallHeight;
+            const trueCentroidY = (rectArea * (upperWallBottom + lowerWallHeight / 2) + triArea * (upperWallBottom - triH / 3)) / (rectArea + triArea);
+            return Bodies.fromVertices(
+                leftWallCenterX, trueCentroidY,
+                [[
+                    { x: 0, y: bufferY },
+                    { x: config.wallThickness, y: upperWallBottom },
+                    { x: config.wallThickness, y: config.canvasHeight },
+                    { x: 0, y: config.canvasHeight }
+                ]],
+                wallOptions
+            );
+        })(),
+    ]);
+
+    // 槽口参数（右斜坡需要 slotTopY）
+    const slotHeight = 32;
+    const slotTopY = 744; // +20
+    const slotBottomY = slotTopY + slotHeight; // 758
+    const rightUpperH = slotTopY - upperWallBottom;
+    const rightWallOuterX = rightWallCenterX + config.wallThickness / 2;
+
+    // 右墙上段直角梯形（直角在右侧）
+    const trapBody = Bodies.fromVertices(
+        rightWallCenterX + 4.5, upperWallBottom - 48,
+        [[
+            { x: rightWallCenterX - config.wallThickness/2, y: upperWallBottom },
+            { x: rightWallCenterX + config.wallThickness/2, y: upperWallBottom },
+            { x: rightWallCenterX + config.wallThickness/2, y: oldWallTopY },
+            { x: rightWallCenterX + config.wallThickness/2 - 20, y: oldWallTopY }
+        ]],
+        { isStatic: true, render: { fillStyle: '#4a4a6a' }, restitution: 0.8, friction: 0.1, density: 1 },
+        true
+    );
+    Composite.add(world, trapBody);
+
+    // 旧右墙上端顶部半圆实体（半径=34）
+    const oldWallInnerX = rightWallCenterX + config.wallThickness / 2 - upperWallThickness - 20;
+    const semiR = 30;
+    const semiVerts = [];
+    for (let i = 0; i <= 50; i++) {
+        const angle = Math.PI + (Math.PI * i / 50);
+        semiVerts.push({ x: Math.cos(angle) * semiR, y: Math.sin(angle) * semiR });
+    }
+    const semiBody = Bodies.fromVertices(
+        oldWallInnerX, oldWallTopY - 4 * semiR / (3 * Math.PI),
+        [semiVerts],
+        { isStatic: true, render: { fillStyle: '#4a4a6a' }, restitution: 0.8, friction: 0.1 },
+        true
+    );
+    Composite.add(world, semiBody);
+
+    // 右侧新墙（宽度=右墙上段厚度，高度=画布高度）
+    Composite.add(world, Bodies.rectangle(
+        config.canvasWidth - upperWallThickness / 2,
+        config.canvasHeight / 2,
+        upperWallThickness,
+        config.canvasHeight,
+        wallOptions
+    ));
+
+    const cornerR = 140; // 圆角半径
+
+    // 左上角圆弧中心大钉（3倍体积，半径=pinRadius*√3）
+    const bigPinRadius = config.pinRadius * Math.sqrt(3); // ≈10.4
+    const bigPinDist = cornerR - bigPinRadius - 2; // 距圆弧中心的距离
+    const bigPinX = cornerR - bigPinDist * Math.cos(Math.PI / 4);
+    const bigPinY = cornerR - bigPinDist * Math.sin(Math.PI / 4);
+    Composite.add(world, Bodies.circle(bigPinX, bigPinY, bigPinRadius, {
+        isStatic: true,
+        render: { fillStyle: '#e94560' },
+        restitution: 0.6,
+        friction: 0.1
+    }));
+
+    // ===== 圆弧碰撞体（密集小矩形拼接，防隧穿）=====
+    function createCornerArc(cx, cy, radiusX, radiusY, startAngle, endAngle, segments, thickness) {
+        const parts = [];
+        const step = (endAngle - startAngle) / segments;
+
+        for (let i = 0; i <= segments; i++) {
+            const angle = startAngle + i * step;
+            const x = cx + Math.cos(angle) * radiusX;
+            const y = cy + Math.sin(angle) * radiusY;
+
+            const dx = -Math.sin(angle) * radiusX;
+            const dy =  Math.cos(angle) * radiusY;
+            const tangentAngle = Math.atan2(dy, dx);
+            const arcLen = Math.sqrt(dx*dx + dy*dy) * step;
+
+            parts.push(
+                Bodies.rectangle(x, y, arcLen + 2, thickness, {
+                    isStatic: true,
+                    angle: tangentAngle,
+                    // render: { fillStyle: '#4a4a6a' },
+                    render: { visible: true },
+                    restitution: 0.15,
+                    friction: 0
+                })
+            );
+        }
+
+        return parts;
+    }
+
+    // 左上角圆弧（紧贴画布圆角外侧，从左边到顶部，半径匹配CSS border-radius 120px）
+    const cornerRadius = 120;
+    Composite.add(world, createCornerArc(cornerRadius, cornerRadius, cornerRadius, cornerRadius, Math.PI, Math.PI * 1.5, 25, 15));
+
+    // 右上角等边直角三角形（紧贴边界，斜边朝左下）
+    const triLeg = 60; // 直角边长 = 圆角半径
+    const triRightX = config.canvasWidth;  // 右上角顶点X（画布右边界）
+    const triRightY = 15;
+    const triBody = Bodies.fromVertices(
+        (triRightX + (triRightX - triLeg) + triRightX) / 3,
+        (triRightY + triRightY + (triRightY + triLeg)) / 3,
+        [[
+            { x: triRightX, y: triRightY },                // 右上角（直角）
+            { x: triRightX - triLeg, y: triRightY },       // 左上角
+            { x: triRightX, y: triRightY + triLeg }        // 右下角
+        ]],
+        { 
+            isStatic: true, 
+            // render: { fillStyle: '#4a4a6a' }, 
+            render: { visible: true }, // 永远隐藏
+            restitution: 0.15, 
+            friction: 0 
+        },
+        true
+    );
+    Composite.add(world, triBody);
+
+    // 左上角等边直角三角形（与右上角对称，斜边朝右下）
+    // const triLeftBody = Bodies.fromVertices(
+    //     (0 + triLeg + 0) / 3,
+    //     (0 + 0 + triLeg) / 3,
+    //     [[
+    //         { x: 0, y: 0 },                // 左上角（直角）
+    //         { x: triLeg, y: 0 },            // 右上角
+    //         { x: 0, y: triLeg }             // 左下角
+    //     ]],
+    //     {
+    //         isStatic: true,
+    //         render: { visible: true },
+    //         restitution: 0.15,
+    //         friction: 0
+    //     },
+    //     true
+    // );
+    // Composite.add(world, triLeftBody);
+
+    // ---------------------- 6. 创建五排交错钢钉 ----------------------
+    const pinOptions = {
+        isStatic: true,
+        render: { fillStyle: '#e94560' },
+        restitution: 0.6,
+        friction: 0.1
+    };
+
+    for (let row = 0; row < config.pinRows; row++) {
+        const offsetX = row % 2 === 0 ? 0 : config.spacingX / 2;
+
+        for (let col = 0; col < config.pinsPerRow; col++) {
+            const x = leftmostPinCenterX + offsetX + col * config.spacingX;
+            const y = config.startY + row * config.spacingY;
+
+            // 1/3/5排最后一个、2/4排第一个使用靠墙半径
+            const isWallPin = (row % 2 === 0 && col === config.pinsPerRow - 1) ||
+                              (row % 2 === 1 && col === 0);
+            const r = isWallPin ? config.wallPinRadius : config.pinRadius;
+
+            const pin = Bodies.circle(x, y, r, pinOptions);
+            Composite.add(world, pin);
+        }
+    }
+
+    // ---------------------- 6.1 缓冲钉区 ----------------------
+    const canvasCenterX = config.canvasWidth / 2;
+
+    // 中间6颗钉子（#1对齐第1排左侧第2颗，#6对齐第1排右侧第2颗）
+    const bufferPins = [];
+    const bufferPin1X = leftmostPinCenterX + config.spacingX;         // 第1排col=1
+    const bufferPin6X = leftmostPinCenterX + (config.pinsPerRow - 2) * config.spacingX; // 第1排col=9
+    const bufferSpacing = (bufferPin6X - bufferPin1X) / 5;
+    for (let i = 0; i < 6; i++) {
+        const x = bufferPin1X + i * bufferSpacing;
+        bufferPins.push({ x, y: bufferY });
+        Composite.add(world, Bodies.circle(x, bufferY, config.pinRadius, pinOptions));
+    }
+
+    // 左侧4颗钉子（朝内60度，#7到#1间距=#6到#11间距）
+    const diagSpacingY = Math.round(7 * Math.tan(Math.PI / 3)); // 7*tan(60°) ≈ 12
+    const leftGroupStartX = bufferPin1X - 51 + 8 - 8; // 左斜向钉起点
+    for (let i = 0; i < 4; i++) {
+        const x = leftGroupStartX - (i + 1) * 7;
+        const y = bufferY - i * diagSpacingY;
+        bufferPins.push({ x, y });
+        Composite.add(world, Bodies.circle(x, y, config.pinRadius, pinOptions));
+    }
+
+    // 右侧4颗钉子（朝内60度，从右下往右上排列，最下一颗和中间同行）
+    const rightGroupStartX = rightWallInner - 32 + 8; // 右斜向钉起点
+    for (let i = 0; i < 4; i++) {
+        const x = rightGroupStartX + (i + 1) * 7;
+        const y = bufferY - i * diagSpacingY;
+        bufferPins.push({ x, y });
+        Composite.add(world, Bodies.circle(x, y, config.pinRadius, pinOptions));
+    }
+
+    // 斜向钉防隧穿隐形条（覆盖钉间缝隙）
+    const diagLen = 58;  // 略长于4颗钉总跨度(54)
+    const diagThick = 16;
+    const diagMidY = bufferY - 1.5 * diagSpacingY; // 4颗钉Y中点
+    // 左侧
+    const leftDiagMidX = leftGroupStartX - 17.5;    // pin0(33) + pin3(12) 的中点
+    Composite.add(world, Bodies.rectangle(leftDiagMidX, diagMidY, diagLen, diagThick, {
+        isStatic: true, angle: Math.atan2(diagSpacingY * 3, 21), render: { visible: true }, friction: 0, restitution: 0
+    }));
+    // 右侧
+    const rightDiagMidX = rightGroupStartX + 17.5;  // pin0(482) + pin3(503) 的中点
+    Composite.add(world, Bodies.rectangle(rightDiagMidX, diagMidY, diagLen, diagThick, {
+        isStatic: true, angle: Math.atan2(-diagSpacingY * 3, 21), render: { visible: true }, friction: 0, restitution: 0
+    }));
+
+    // ---------------------- 7. 创建洞口和指示灯 ----------------------
+    const holeCount = 12;
+    const holeY = 660; // +20
+    const holeRadius = 15; // 洞口大小（和钢珠一致）
+    const dividerWidth = 8; // 隔板宽度
+    const dividerHeight = 60; // 隔板高度
+
+    // 计算洞口间距
+    // 左侧第一个隔板 = 第1/3/5排第二个钉子横坐标
+    const firstDividerX = leftmostPinCenterX + config.spacingX;
+    // 计算洞口间距，确保最后一个洞口不超过右墙
+    // 最后一个洞口 = firstDividerX - holeSpacing/2 + 11 * holeSpacing <= rightWallInner
+    const maxHoleSpacing = (rightWallInner - firstDividerX) / 10.5;
+    const lastDividerX = leftmostPinCenterX + (config.pinsPerRow - 1) * config.spacingX + config.spacingX / 2 - config.spacingX;
+    const holeSpacing = (lastDividerX - firstDividerX) / 10;
+    // 第一个洞口位置
+    const holeLeft = firstDividerX - holeSpacing / 2;
+
+    // ---------------------- 6.5 创建墙壁斜坡 ----------------------
+    const slopeTop = config.startY + (config.pinRows - 1) * config.spacingY + config.pinRadius; // 第5排钉子下底
+    const slopeBottom = holeY - dividerHeight / 2 - config.pinRadius * 2 - 3 - holeRadius * 2; // 指示灯外边缘顶部
+    // 内侧底点横坐标 = 边灯背景圈最外侧边缘（holeRadius + 2）
+    const leftInnerX = holeLeft - holeRadius - 2;           // 1号灯背景左边缘
+    const rightInnerX = holeLeft + 11 * holeSpacing + holeRadius + 2; // 12号灯背景右边缘
+
+    // 挡板参数（斜坡底部需要引用）
+    // 左斜坡（梯形：斜边在上，底部延伸至挡板斜面）
+    const baffleTopLeftY = 714; // +20
+    const baffleTopRightY = 774; // +20
+    const baffleThickness = 24;
+
+    const leftBottomY = baffleTopLeftY; // 左下角贴挡板左墙
+    const leftInnerBottomY = baffleTopLeftY + (leftInnerX - leftWallInner) / (rightWallInner - leftWallInner) * (baffleTopRightY - baffleTopLeftY); // 内侧贴挡板斜面
+    Composite.add(world, Bodies.fromVertices(
+        (leftWallInner + leftWallInner + leftInnerX + leftInnerX) / 4,
+        (slopeTop + slopeBottom + leftBottomY + leftInnerBottomY) / 4,
+        [[
+            { x: leftWallInner, y: slopeTop },
+            { x: leftWallInner, y: leftBottomY },
+            { x: leftInnerX, y: leftInnerBottomY },
+            { x: leftInnerX, y: slopeBottom }
+        ]],
+        { isStatic: true, render: { fillStyle: '#22c55e' }, friction: 0, restitution: 0 }
+    ));
+
+    // 右斜坡（轴对称梯形：上下斜边镜像对称，下端延伸至右墙槽口）
+    const rightSlopeBottomLeftY = slotTopY - 24; // 702，下斜边落差24
+    Composite.add(world, Bodies.fromVertices(
+        (rightWallInner + rightInnerX) / 2,
+        (slopeBottom + slopeTop + rightSlopeBottomLeftY + slotTopY) / 4,
+        [[
+            { x: rightWallInner, y: slopeTop },               // 上右 516（同左斜坡左上）
+            { x: rightInnerX, y: slopeBottom },            // 上左 565（同左斜坡右上）
+            { x: rightInnerX, y: rightSlopeBottomLeftY },  // 下左 702
+            { x: rightWallInner, y: slotTopY }             // 下右 726
+        ]],
+        { isStatic: true, render: { fillStyle: '#22c55e' }, friction: 0, restitution: 0 }
+    ));
+
+    // 右墙槽口墙体（上下段 + 下方斜角梯形，坡度取左侧斜坡下斜边）
+    (() => {
+        const leftSlopeRatio = (leftInnerBottomY - leftBottomY) / (leftInnerX - leftWallInner);
+        const slotLowerTopInnerY = slotBottomY;
+        const slotLowerTopOuterY = slotBottomY + config.wallThickness * leftSlopeRatio;
+        const bottomY = config.canvasHeight + 4; // 稍叠地板，消除接缝
+        const centroidY = (2 * slotBottomY + slotLowerTopOuterY + 3 * bottomY) / 6;
+        Composite.add(world, [
+            Bodies.rectangle(rightWallCenterX, upperWallBottom + rightUpperH / 2, config.wallThickness, rightUpperH, wallOptions),
+            Bodies.fromVertices(
+                (rightWallInner + rightWallOuterX) / 2, centroidY,
+                [[
+                    { x: rightWallInner, y: slotLowerTopInnerY },
+                    { x: rightWallOuterX, y: slotLowerTopOuterY },
+                    { x: rightWallOuterX, y: bottomY },
+                    { x: rightWallInner, y: bottomY }
+                ]],
+                wallOptions
+            ),
+        ]);
+    })();
+
+    // 洞口区下方梯形挡板（左高右低斜向，厚度=钢珠直径24px）
+    Composite.add(world, Bodies.fromVertices(
+        (leftWallInner + rightWallInner) / 2,
+        (baffleTopLeftY + baffleTopRightY + baffleTopLeftY + baffleThickness + baffleTopRightY + baffleThickness) / 4,
+        [[
+            { x: leftWallInner, y: baffleTopLeftY },
+            { x: rightWallInner, y: baffleTopRightY },
+            { x: rightWallInner, y: baffleTopRightY + baffleThickness },
+            { x: leftWallInner, y: baffleTopLeftY + baffleThickness }
+        ]],
+        { isStatic: true, render: { fillStyle: '#4a4a6a' }, friction: 0, restitution: 0 }
+    ));
+
+    // 左下角直角三角形墙壁（底边贴画布底边，左边贴左侧墙壁）
+    const triBottomW = 400;
+    const triBottomH = 60;
+    Composite.add(world, Bodies.fromVertices(
+        leftWallInner + triBottomW / 3, config.canvasHeight - triBottomH / 3,
+        [[
+            { x: leftWallInner, y: config.canvasHeight },            // 直角顶点（底左）
+            { x: leftWallInner, y: config.canvasHeight - triBottomH }, // 左上
+            { x: leftWallInner + triBottomW, y: config.canvasHeight }  // 右下
+        ]],
+        { isStatic: true, render: { fillStyle: '#4a4a6a' }, friction: 0.02, restitution: 0.1 },
+        true
+    ));
+
+    // ===== 槽口圆形挡杆（可伸缩）=====
+    const stopperRadius = (slotHeight / 2 + 3) / 2; // 9，调小一半
+    const stopperX = rightWallCenterX;
+    const stopperY = slotTopY + slotHeight / 2;
+    let stopperVisible = true;
+    const stopperBody = Bodies.circle(stopperX, stopperY, stopperRadius, {
+        isStatic: true,
+        render: { visible: false },
+        collisionFilter: { group: 0, category: 0x0001, mask: 0xFFFFFFFF },
+        friction: 0,
+        restitution: 0
+    });
+    Composite.add(world, stopperBody);
+
+    function retractStopper() {
+        stopperBody.collisionFilter.mask = 0; // 无碰撞
+        stopperVisible = false;
+    }
+    function extendStopper() {
+        stopperBody.collisionFilter.mask = 0xFFFFFFFF; // 恢复碰撞
+        stopperVisible = true;
+    }
+
+    // ===== 弹簧视觉 + 物理平台 =====
+    const springAreaX = rightWallCenterX + config.wallThickness / 2 + 25;
+    const springX = springAreaX;
+    const springAnchorY = config.canvasHeight;
+    const springRestTopY = springAnchorY - 30; // 820，平台底边=850=画布底边
+    let springPullOffset = 0;  // 拉杆联动偏移量（0~60）
+
+    // 物理平台厚度（抗穿模关键）
+    const SPRING_PHYSICS_HEIGHT = 60;
+
+    // 厚物理平台（隐藏，只负责碰撞检测）
+    const springPlatBody = Bodies.rectangle(springX, springRestTopY, 50, SPRING_PHYSICS_HEIGHT, {
+        isStatic: true,
+        render: { visible: true } // 永远隐藏
+    });
+    Composite.add(world, springPlatBody);
+
+    // 钢珠静止位置（统一基准：贴紧物理接触点）
+    function getBallRestY() {
+        const contactY = springPlatBody.position.y - SPRING_PHYSICS_HEIGHT / 2;
+        return contactY - config.ballRadius;
+    }
+
+    // 钢珠管理
+    let springBall = null;
+
+    // 初始钢珠（挡杆左侧）
+    springBall = Bodies.circle(rightWallInner - config.ballRadius - 6, stopperY, config.ballRadius, {
+        restitution: 0.3,
+        friction: 0,
+        frictionAir: 0.001,
+        density: 0.001,
+        render: { fillStyle: '#0f4c75' }
+    });
+    Composite.add(world, springBall);
+
+    // 弹簧平台位置更新（静态体直接setPosition）
+    Matter.Events.on(engine, 'beforeUpdate', function() {
+        const targetY = springRestTopY + springPullOffset;
+        Matter.Body.setPosition(springPlatBody, { x: springX, y: targetY });
+
+        // 防穿透：所有靠近平台的钢珠都强制推到平台上方
+        const contactY = springPlatBody.position.y - SPRING_PHYSICS_HEIGHT / 2;
+        Composite.allBodies(world).forEach(b => {
+            if (b.circleRadius && !b.isStatic && Math.abs(b.position.x - springX) < 40 &&
+                b.position.y > contactY - config.ballRadius) {
+                Matter.Body.setPosition(b, { x: b.position.x, y: contactY - config.ballRadius });
+            }
+        });
+
+        // 清理出界金珠
+        for (let i = goldPhysBalls.length - 1; i >= 0; i--) {
+            if (goldPhysBalls[i].position.y > config.canvasHeight + 10) {
+                Composite.remove(world, goldPhysBalls[i]);
+                goldPhysBalls.splice(i, 1);
+            }
+        }
+
+        // 检测钢珠回落到平台（重新接管）
+        if (!springBall) {
+            const allBodies = Composite.allBodies(world);
+            for (let b of allBodies) {
+                if (b.circleRadius && !b.isStatic) {
+                    const expectedY = getBallRestY();
+                    if (Math.abs(b.position.x - springX) < 30 &&
+                        Math.abs(b.position.y - expectedY) < 10 &&
+                        Math.abs(b.velocity.y) < 5) {
+                        springBall = b;
+                        if (gameState === GAME_STATE.IDLE) updateDisplay();
+                        break;
+                    }
+                }
+            }
+        }
+    });
+
+    // 创建隔板和指示灯
+    const dividerOptions = {
+        isStatic: true,
+        render: { fillStyle: '#4a4a6a' },
+        restitution: 0.5,
+        friction: 0.3
+    };
+
+    // 指示灯颜色（初始状态）
+    const lightOffColor = '#2a2a4a';
+    const lightOnColor = '#e94560'; // 统一红色
+
+    // 隔板顶部位置
+    const dividerTop = holeY - dividerHeight / 2;
+
+    for (let i = 0; i < 11; i++) {
+        // 创建11个隔板
+        const dividerX = firstDividerX + i * holeSpacing;
+        const divider = Bodies.rectangle(dividerX, holeY, dividerWidth, dividerHeight, dividerOptions);
+        Composite.add(world, divider);
+
+        // 在隔板顶部上方创建钢钉
+        const pinX = dividerX;
+        const pinY = dividerTop - config.wallPinRadius - 3;
+        const pin = Bodies.circle(pinX, pinY, config.wallPinRadius, {
+            isStatic: true,
+            render: { fillStyle: '#e94560' },
+            restitution: 0.6,
+            friction: 0.1
+        });
+        Composite.add(world, pin);
+    }
+
+    // 创建指示灯（画在canvas上，不是物理对象）
+    // 指示灯底部和隔板钢钉底部对齐
+    const pinBottom = dividerTop - config.wallPinRadius * 2 - 3; // 钢钉底部位置
+    const lightY = pinBottom - holeRadius; // 指示灯中心
+    const holeLights = [];
+    const holeSensors = []; // 碰撞传感器
+    for (let i = 0; i < holeCount; i++) {
+        const holeX = holeLeft + i * holeSpacing;
+        holeLights.push({
+            x: holeX,
+            y: lightY,
+            radius: holeRadius,
+            color: lightOffColor,
+            active: false
+        });
+        const sensor = Bodies.circle(holeX, holeY, holeRadius, {
+            isStatic: true,
+            isSensor: true,
+            render: { visible: false },
+            label: 'holeSensor_' + i
+        });
+        holeSensors.push(sensor);
+        Composite.add(world, sensor);
+    }
+
+    // 弹簧顶部Y（用于发射位置计算）
+    const springTopY = springRestTopY;
+
+    // 洞口碰撞检测（传感器触发，零漏检）
+    let holeLandedThisRound = false;
+    let launchTimeoutId = null;
+    let launchHeartbeatId = null;
+    let launchBoundsCheckId = null;
+    function clearLaunchTimers() {
+        if (launchTimeoutId) { clearTimeout(launchTimeoutId); launchTimeoutId = null; }
+        if (launchHeartbeatId) { clearInterval(launchHeartbeatId); launchHeartbeatId = null; }
+        if (launchBoundsCheckId) { clearInterval(launchBoundsCheckId); launchBoundsCheckId = null; }
+    }
+    Matter.Events.on(engine, 'collisionStart', function(event) {
+        if (!holeLandedThisRound && gameState === GAME_STATE.PLAYING) {
+            for (const pair of event.pairs) {
+                const a = pair.bodyA, b = pair.bodyB;
+                const sensor = (a.label && a.label.startsWith('holeSensor_')) ? a :
+                               (b.label && b.label.startsWith('holeSensor_')) ? b : null;
+                const ballBody = (a.circleRadius && !a.isStatic) ? a :
+                                 (b.circleRadius && !b.isStatic) ? b : null;
+                if (sensor && ballBody) {
+                    const holeIndex = parseInt(sensor.label.split('_')[1]);
+                    holeLandedThisRound = true;
+                    handleBallLanded(holeIndex);
+                    return;
+                }
+            }
+        }
+    });
+
+    const springBallRadius = 10;
+
+    // 自定义渲染：绘制指示灯
+    Matter.Events.on(render, 'afterRender', function() {
+        const ctx = render.context;
+
+        // 先绘制所有指示灯
+        holeLights.forEach((light, index) => {
+            // 绘制灯的外圈（发光效果）
+            if (light.active) {
+                ctx.beginPath();
+                ctx.arc(light.x, light.y, light.radius + 5, 0, Math.PI * 2);
+                ctx.fillStyle = light.color + '60'; // 半透明发光
+                ctx.fill();
+            }
+
+            // 绘制洞口背景
+            ctx.beginPath();
+            ctx.arc(light.x, light.y, light.radius + 2, 0, Math.PI * 2);
+            ctx.fillStyle = '#0a0a1a';
+            ctx.fill();
+
+            // 绘制灯
+            ctx.beginPath();
+            ctx.arc(light.x, light.y, light.radius, 0, Math.PI * 2);
+            ctx.fillStyle = light.active ? light.color : lightOffColor;
+            ctx.fill();
+            ctx.strokeStyle = '#4a4a6a';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // 绘制灯的高光效果
+            if (light.active) {
+                ctx.beginPath();
+                ctx.arc(light.x - 4, light.y - 4, 4, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(255,255,255,0.3)';
+                ctx.fill();
+            }
+
+            // 绘制洞口编号
+            ctx.fillStyle = light.active ? '#fff' : '#666';
+            ctx.font = 'bold 10px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText((index + 1).toString(), light.x, light.y);
+        });
+
+        // 绘制缓冲钉区编号
+        bufferPins.forEach((p, i) => {
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 9px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText((i + 1).toString(), p.x, p.y);
+        });
+
+        // 再绘制所有钢珠（确保钢珠在指示灯上方）
+        const allBodies = Composite.allBodies(world);
+        allBodies.forEach(body => {
+            if (body.circleRadius && !body.isStatic && body.render.fillStyle !== '#eab308') {
+                const r = body.circleRadius;
+                const bx = body.position.x, by = body.position.y;
+                // 钢珠主体银色渐变
+                ctx.beginPath();
+                ctx.arc(bx, by, r, 0, Math.PI * 2);
+                const bGrad = ctx.createRadialGradient(bx - r*0.3, by - r*0.3, r*0.1, bx, by, r);
+                bGrad.addColorStop(0, '#f8fafc');
+                bGrad.addColorStop(0.4, '#cbd5e1');
+                bGrad.addColorStop(0.7, '#94a3b8');
+                bGrad.addColorStop(1, '#475569');
+                ctx.fillStyle = bGrad;
+                ctx.fill();
+                ctx.strokeStyle = '#334155';
+                ctx.lineWidth = 0.8;
+                ctx.stroke();
+                // 高光点
+                ctx.beginPath();
+                ctx.arc(bx - r*0.3, by - r*0.3, r*0.3, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(255,255,255,0.4)';
+                ctx.fill();
+            }
+        });
+
+        // 槽口圆形挡杆
+        const stopperVX = rightWallCenterX;
+        const stopperVY = slotTopY + slotHeight / 2;
+        if (stopperVisible) {
+            ctx.beginPath();
+            ctx.arc(stopperVX, stopperVY, stopperRadius - 2, 0, Math.PI * 2);
+            ctx.fillStyle = '#e94560';
+            ctx.fill();
+            ctx.strokeStyle = '#c73e54';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            // 高光
+            ctx.beginPath();
+            ctx.arc(stopperVX - 3, stopperVY - 3, 3, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255,255,255,0.25)';
+            ctx.fill();
+        }
+
+        // ===== 统一基准：物理平台底部 =====
+        const H = SPRING_PHYSICS_HEIGHT;
+        const h = 2;
+        const platformBottomY = springPlatBody.position.y + H / 2;
+
+        // ===== 视觉弹簧（从物理平台底部向上画）=====
+        const springStartY = platformBottomY;
+        const springLen = 58 - springPullOffset * 0.8;
+        const coils = 10;
+        const coilH = springLen / coils;
+        const coilW = 14 + springPullOffset * 0.06;
+
+        ctx.strokeStyle = '#94a3b8';
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(springX, springStartY);
+        for (let i = 0; i < coils; i++) {
+            const y2 = springStartY - (i + 0.5) * coilH;
+            const y3 = springStartY - (i + 1) * coilH;
+            const dir = i % 2 === 0 ? 1 : -1;
+            ctx.quadraticCurveTo(springX + dir * coilW, y2, springX, y3);
+        }
+        ctx.stroke();
+
+        // 弹簧底座（在平台底部）
+        ctx.fillStyle = '#4a4a6a';
+        ctx.fillRect(springX - 15, springStartY - 3, 30, 6);
+
+        // ===== 12洞传感器检测区可视化 =====
+        for (let i = 0; i < holeCount; i++) {
+            const hx = holeLeft + i * holeSpacing;
+            ctx.beginPath();
+            ctx.arc(hx, holeY, holeRadius, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(239, 68, 68, 0.12)';
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(239, 68, 68, 0.5)';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([2, 3]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.7)';
+        ctx.font = '9px Arial';
+        ctx.textAlign = 'right';
+        ctx.fillText('传感器 r=' + holeRadius + ' (碰撞检测)', config.canvasWidth - 10, holeY - holeRadius - 4);
+
+        // ===== 微动开关触片（纯视觉）=====
+        for (let i = 0; i < holeCount; i++) {
+            const hx = holeLeft + i * holeSpacing;
+            const hy = holeY;
+            const sw = 4;   // 宽
+            const sh = 16;  // 高
+            const r = 2;    // 圆角
+            ctx.beginPath();
+            ctx.moveTo(hx - sw / 2 + r, hy - sh / 2);
+            ctx.lineTo(hx + sw / 2 - r, hy - sh / 2);
+            ctx.arcTo(hx + sw / 2, hy - sh / 2, hx + sw / 2, hy - sh / 2 + r, r);
+            ctx.lineTo(hx + sw / 2, hy + sh / 2 - r);
+            ctx.arcTo(hx + sw / 2, hy + sh / 2, hx + sw / 2 - r, hy + sh / 2, r);
+            ctx.lineTo(hx - sw / 2 + r, hy + sh / 2);
+            ctx.arcTo(hx - sw / 2, hy + sh / 2, hx - sw / 2, hy + sh / 2 - r, r);
+            ctx.lineTo(hx - sw / 2, hy - sh / 2 + r);
+            ctx.arcTo(hx - sw / 2, hy - sh / 2, hx - sw / 2 + r, hy - sh / 2, r);
+            ctx.closePath();
+            const grad = ctx.createLinearGradient(hx - sw / 2, 0, hx + sw / 2, 0);
+            grad.addColorStop(0, '#64748b');
+            grad.addColorStop(0.3, '#cbd5e1');
+            grad.addColorStop(0.5, '#f8fafc');
+            grad.addColorStop(0.7, '#94a3b8');
+            grad.addColorStop(1, '#475569');
+            ctx.fillStyle = grad;
+            ctx.fill();
+            ctx.strokeStyle = '#334155';
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+        }
+
+        // 金珠高光（物理体由Matter.js渲染，这里补高光）
+        goldPhysBalls.forEach(gb => {
+            ctx.beginPath();
+            ctx.arc(gb.position.x - 2, gb.position.y - 2, 3, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255,255,255,0.3)';
+            ctx.fill();
+        });
+    });
+
+    // ---------------------- 8. 钢珠发射逻辑 ----------------------
+    function launchBall(power) {
+        if (!springBall) return;
+        if (gameState !== GAME_STATE.READY) return;
+
+        gameState = GAME_STATE.PLAYING;
+        holeLandedThisRound = false;
+        updateDisplay();
+
+        // 把钢珠移到压缩位置（统一基准）
+        Matter.Body.setPosition(springBall, { x: springX, y: getBallRestY() });
+
+        // 计算速度，限制最大值
+        let velocityY = -power * 0.02;
+        const totalVelocity = Math.abs(velocityY);
+        if (totalVelocity > config.maxVelocity) {
+            velocityY = -config.maxVelocity;
+        }
+        Matter.Body.setVelocity(springBall, { x: 0, y: velocityY });
+
+        const ball = springBall;
+        springBall = null;
+
+        // 清理上一轮残留定时器
+        clearLaunchTimers();
+
+        // 15秒超时 + 飞出区域兜底
+        let elapsedSeconds = 0;
+        launchHeartbeatId = setInterval(() => {
+            elapsedSeconds++;
+            console.log('[超时计时] 第 ' + elapsedSeconds + ' 秒 — 坐标(' +
+                ball.position.x.toFixed(1) + ', ' + ball.position.y.toFixed(1) +
+                ') 速度(' + ball.velocity.x.toFixed(2) + ', ' + ball.velocity.y.toFixed(2) + ')');
+        }, 1000);
+
+        launchTimeoutId = setTimeout(() => {
+            clearInterval(launchBoundsCheckId);
+            clearInterval(launchHeartbeatId);
+            if (gameState !== GAME_STATE.PLAYING) return;
+            console.warn('[BUG] 15秒超时 — 钢珠未通过洞口检测区');
+            console.log('  钢珠坐标:', ball.position.x.toFixed(1), ball.position.y.toFixed(1));
+            console.log('  钢珠速度:', ball.velocity.x.toFixed(2), ball.velocity.y.toFixed(2));
+            console.log('  游戏状态:', gameState, 'holeLanded:', holeLandedThisRound);
+            gold += currentBet;
+            resultMessage.textContent = '抱歉，检测到游戏 bug，已返还 ' + currentBet + ' 金币';
+            resultMessage.style.color = '#eab308';
+            const allBodies = Composite.allBodies(world);
+            for (let b of allBodies) {
+                if (b.circleRadius && !b.isStatic) Composite.remove(world, b);
+            }
+            springBall = Bodies.circle(rightWallInner - config.ballRadius - 6, stopperY, config.ballRadius, {
+                restitution: 0.3, friction: 0, frictionAir: 0.001, density: 0.001,
+                render: { visible: false }
+            });
+            Composite.add(world, springBall);
+            extendStopper();
+            gameState = GAME_STATE.RESULT;
+            updateDisplay();
+            setTimeout(() => resetGame(), 2500);
+        }, 15000);
+
+        // 飞出区域兜底（低频检测）
+        launchBoundsCheckId = setInterval(() => {
+            if (gameState !== GAME_STATE.PLAYING) { clearLaunchTimers(); return; }
+            const bp = ball.position;
+            if (bp.x < -50 || bp.x > config.canvasWidth + 50 || bp.y < -600) {
+                console.warn('[BUG] 钢珠飞出区域 — x:' + bp.x.toFixed(1) + ' y:' + bp.y.toFixed(1));
+                console.log('  速度:', ball.velocity.x.toFixed(2), ball.velocity.y.toFixed(2));
+                console.log('  画布范围: 0~' + config.canvasWidth + ' x 0~' + config.canvasHeight);
+                clearLaunchTimers();
+                gold += currentBet;
+                resultMessage.textContent = '抱歉，检测到游戏 bug，已返还 ' + currentBet + ' 金币';
+                resultMessage.style.color = '#eab308';
+                const allBodies = Composite.allBodies(world);
+                for (let b of allBodies) {
+                    if (b.circleRadius && !b.isStatic) Composite.remove(world, b);
+                }
+                springBall = Bodies.circle(rightWallInner - config.ballRadius - 6, stopperY, config.ballRadius, {
+                    restitution: 0.3, friction: 0, frictionAir: 0.001, density: 0.001,
+                    render: { visible: false }
+                });
+                Composite.add(world, springBall);
+                extendStopper();
+                gameState = GAME_STATE.RESULT;
+                updateDisplay();
+                setTimeout(() => resetGame(), 2500);
+            }
+            // 钢珠回到弹簧平台 → 继续玩
+            if (springBall && springBall.id === ball.id) {
+                clearLaunchTimers();
+                gameState = GAME_STATE.READY;
+                updateDisplay();
+            }
+        }, 200);
+    }
+
+    // ===================== 投注与奖励系统 =====================
+    const GAME_STATE = Object.freeze({ IDLE: 'idle', READY: 'ready', PLAYING: 'playing', RESULT: 'result' });
+    let gameState = GAME_STATE.IDLE;
+    let gold = 100;
+    let currentBet = 0;
+    let currentMultiplier = 1;
+    let rewardHoleIndices = [];
+    let goldPhysBalls = []; // 赢球物理体列表
+
+    function pickMultiplier() {
+        const entries = Object.entries(MULTIPLIER_WEIGHTS);
+        const totalWeight = entries.reduce((sum, [, w]) => sum + w, 0);
+        let r = Math.random() * totalWeight;
+        for (const [m, w] of entries) {
+            r -= w;
+            if (r <= 0) return parseInt(m);
+        }
+        return parseInt(entries[entries.length - 1][0]);
+    }
+    const holeCountForReward = holeCount; // 12
+
+    // DOM 引用
+    const goldDisplay = document.getElementById('goldDisplay');
+    const betDisplay = document.getElementById('betDisplay');
+    const multiplierDisplay = document.getElementById('multiplierDisplay');
+    const rewardDisplay = document.getElementById('rewardDisplay');
+    const resultMessage = document.getElementById('resultMessage');
+    const btnBet1 = document.getElementById('btnBet1');
+    const btnBet10 = document.getElementById('btnBet10');
+    const btnStart = document.getElementById('btnStart');
+
+    function updateDisplay() {
+        goldDisplay.textContent = gold;
+        betDisplay.textContent = currentBet;
+        multiplierDisplay.textContent = gameState === GAME_STATE.IDLE ? '--' : '×' + currentMultiplier;
+        rewardDisplay.textContent = gameState === GAME_STATE.IDLE ? 0 : currentBet * currentMultiplier;
+
+        const canBet = (gameState === GAME_STATE.IDLE || gameState === GAME_STATE.READY) && gold >= 1;
+        const canStart = gameState === GAME_STATE.IDLE && currentBet >= 2 && currentBet <= 99;
+        const canBet10 = canBet && gold >= 10 && (currentBet + 10) <= 99;
+
+        btnBet1.disabled = !canBet || (currentBet + 1 > 99);
+        btnBet10.disabled = !canBet10;
+        btnStart.disabled = !canStart;
+
+        if (gameState === GAME_STATE.IDLE && currentBet < 2) {
+            btnStart.textContent = currentBet === 0 ? '请先加投' : '至少投注 2';
+        } else if (gameState === GAME_STATE.READY || gameState === GAME_STATE.PLAYING) {
+            btnStart.textContent = '游戏中...';
+        } else if (gameState === GAME_STATE.RESULT) {
+            btnStart.textContent = '结算中...';
+        } else {
+            btnStart.textContent = '开始游戏';
+        }
+    }
+
+    function addBet(amount) {
+        if (gameState !== GAME_STATE.IDLE && gameState !== GAME_STATE.READY) return;
+        if (currentBet + amount > 99 || gold < amount) return;
+        gold -= amount;
+        currentBet += amount;
+        updateDisplay();
+    }
+
+    function getRewardHoleCount(multiplier) {
+        if (multiplier <= 4) return 3;
+        if (multiplier === 6) return 2;
+        return 1;
+    }
+
+    function selectRewardHoles(count) {
+        const available = Array.from({ length: holeCountForReward }, (_, i) => i);
+        const selected = [];
+        for (let i = 0; i < count; i++) {
+            const idx = Math.floor(Math.random() * available.length);
+            const holeNum = available[idx];
+            selected.push(holeNum);
+            // count>1 时移除选中灯位及其左右各2个，保证间隔>=2
+            const removeRange = count > 1 ? 2 : 1;
+            for (let j = available.length - 1; j >= 0; j--) {
+                if (Math.abs(available[j] - holeNum) <= removeRange) {
+                    available.splice(j, 1);
+                }
+            }
+        }
+        return selected;
+    }
+
+    function startGame() {
+        if (gameState !== GAME_STATE.IDLE) return;
+        if (currentBet < 2 || currentBet > 99) return;
+
+        holeLandedThisRound = false;
+        currentMultiplier = pickMultiplier();
+        const count = getRewardHoleCount(currentMultiplier);
+        rewardHoleIndices = selectRewardHoles(count);
+        rewardHoleIndices.forEach(i => {
+            holeLights[i].active = true;
+            holeLights[i].color = lightOnColor;
+        });
+        console.log('[本局开始] 倍率: ×' + currentMultiplier +
+            ' | 奖励灯位: [' + rewardHoleIndices.map(i => i + 1).join(', ') + ']' +
+            ' | 投注: ' + currentBet + ' | 预计奖励: ' + (currentBet * currentMultiplier));
+
+        // 挡杆缩回，放行钢珠
+        retractStopper();
+        setTimeout(() => extendStopper(), 2000);
+
+        gameState = GAME_STATE.READY;
+        updateDisplay();
+    }
+
+    function resetGame() {
+        rewardHoleIndices.forEach(i => { holeLights[i].active = false; });
+        rewardHoleIndices = [];
+        currentBet = 0;
+        currentMultiplier = 1;
+        resultMessage.textContent = '';
+        holeLandedThisRound = false;
+        gameState = GAME_STATE.IDLE;
+        updateDisplay();
+    }
+
+    function handleBallLanded(holeIndex) {
+        clearLaunchTimers();
+        const isWin = rewardHoleIndices.includes(holeIndex);
+        console.log('[本局结果] 进洞号码: ' + (holeIndex + 1) + ' | ' +
+            (isWin ? '中奖 +' + (currentBet * currentMultiplier) : '未中奖 -' + currentBet) +
+            ' 金币 | 倍率: ×' + currentMultiplier + ' | 投注: ' + currentBet);
+        holeLights[holeIndex].active = true;
+        holeLights[holeIndex].color = lightOnColor;
+
+        if (isWin) {
+            const winnings = currentBet * currentMultiplier;
+            gold += winnings;
+            // 金珠从左上角喷射而出，抛物线飞落
+            const count = Math.min(winnings, 30);
+            const spawnX = leftWallInner;
+            const spawnY = config.canvasHeight - triBottomH - 60;
+            for (let i = 0; i < count; i++) {
+                setTimeout(() => {
+                    const gb = Bodies.circle(spawnX + Math.random() * 20, spawnY + Math.random() * 15, 10, {
+                        restitution: 0.15,
+                        friction: 0.05,
+                        frictionAir: 0.0005,
+                        density: 0.002,
+                        render: { fillStyle: '#eab308' }
+                    });
+                    Matter.Body.setVelocity(gb, { x: 4 + Math.random() * 6, y: -1 + Math.random() * 3 });
+                    goldPhysBalls.push(gb);
+                    Composite.add(world, gb);
+                }, i * 100 + Math.random() * 60);
+            }
+            resultMessage.textContent = '中奖！ +' + winnings + ' 金币';
+            resultMessage.style.color = '#22c55e';
+            // 奖励灯快速闪烁3次
+            let flashes = 0;
+            const flashInterval = setInterval(() => {
+                holeLights[holeIndex].active = !holeLights[holeIndex].active;
+                flashes++;
+                if (flashes >= 6) { clearInterval(flashInterval); holeLights[holeIndex].active = true; }
+            }, 150);
+        } else {
+            resultMessage.textContent = '未中奖，-' + currentBet + ' 金币';
+            resultMessage.style.color = '#ef4444';
+        }
+
+        gameState = GAME_STATE.RESULT;
+        updateDisplay();
+
+        setTimeout(() => {
+            holeLights[holeIndex].active = false;
+            resetGame();
+        }, 2000);
+    }
+
+    function handleBallMissed() {
+        resultMessage.textContent = '未中奖，-' + currentBet + ' 金币';
+        resultMessage.style.color = '#ef4444';
+        gameState = GAME_STATE.RESULT;
+        updateDisplay();
+        setTimeout(() => resetGame(), 2000);
+    }
+
+    // 按钮事件
+    btnBet1.addEventListener('click', () => addBet(2));
+    btnBet10.addEventListener('click', () => addBet(10));
+    btnStart.addEventListener('click', startGame);
+
+    // 重新开始按钮（已投注金币不返还）
+    function restartGame() {
+        clearLaunchTimers();
+        goldPhysBalls.forEach(gb => Composite.remove(world, gb));
+        goldPhysBalls = [];
+        currentBet = 0;
+        currentMultiplier = 1;
+        rewardHoleIndices.forEach(i => { holeLights[i].active = false; });
+        rewardHoleIndices = [];
+        holeLandedThisRound = false;
+        // 清除所有钢珠，挡杆左侧重生一颗
+        const allBodies = Composite.allBodies(world);
+        for (let b of allBodies) {
+            if (b.circleRadius && !b.isStatic) Composite.remove(world, b);
+        }
+        springBall = Bodies.circle(rightWallInner - config.ballRadius - 6, stopperY, config.ballRadius, {
+            restitution: 0.3, friction: 0, frictionAir: 0.001, density: 0.001,
+            render: { visible: false }
+        });
+        Composite.add(world, springBall);
+        extendStopper();
+        resultMessage.textContent = '';
+        gameState = GAME_STATE.IDLE;
+        updateDisplay();
+    }
+    document.getElementById('btnRestart').addEventListener('click', restartGame);
+
+    // ---------------------- 8. 拉杆交互逻辑 ----------------------
+    const plungerHandle = document.getElementById('plungerHandle');
+    const plungerRod = document.getElementById('plungerRod');
+    const powerValue = document.getElementById('powerValue');
+
+    let isDragging = false;
+    let startY = 0;
+    let currentPullDistance = 0;
+
+    // 鼠标按下事件
+    plungerHandle.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        startY = e.clientY;
+        plungerHandle.classList.add('dragging');
+        e.preventDefault();
+    });
+
+    // 鼠标移动事件
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        
+        const deltaY = e.clientY - startY;
+        currentPullDistance = Math.max(0, Math.min(deltaY, config.maxPullDistance));
+        
+        // 金属杆始终填满从容器顶部到把手顶部
+        const handleTop = 60 + currentPullDistance;
+        plungerHandle.style.top = handleTop + 'px';
+        plungerRod.style.height = handleTop + 'px';
+
+        // 计算力度（0-2000）
+        const power = Math.round((currentPullDistance / config.maxPullDistance) * config.maxPower);
+
+        // 更新力度数值显示
+        powerValue.textContent = power;
+
+        // 弹簧随拉杆联动（拉杆下拉距离 → 弹簧压缩量）
+        springPullOffset = currentPullDistance * 0.4;
+    });
+
+    // 鼠标松开事件
+    document.addEventListener('mouseup', () => {
+        if (!isDragging) return;
+        
+        isDragging = false;
+        plungerHandle.classList.remove('dragging');
+        
+        // 计算力度并发射
+        const power = Math.round((currentPullDistance / config.maxPullDistance) * config.maxPower);
+        
+        if (power > 50) {
+            if (gameState !== GAME_STATE.READY) {
+                if (gameState === GAME_STATE.IDLE) {
+                    resultMessage.textContent = '请先开始游戏';
+                    resultMessage.style.color = '#eab308';
+                    setTimeout(() => { if (gameState === GAME_STATE.IDLE) resultMessage.textContent = ''; }, 1500);
+                }
+            } else {
+                launchBall(power);
+            }
+        }
+
+        // 弹簧释放（自动弹回）
+        springPullOffset = 0;
+        
+        // 复位拉杆（带动画效果）
+        setTimeout(() => {
+            plungerHandle.style.top = '60px';
+            plungerRod.style.height = '60px';
+            powerValue.textContent = '0';
+            currentPullDistance = 0;
+        }, 100);
+    });
+
+    // 防止拖拽时选择文本
+    document.addEventListener('selectstart', (e) => {
+        if (isDragging) {
+            e.preventDefault();
+        }
+    });
+
+    // ---------------------- 9. 启动物理引擎 ----------------------
+    Render.run(render);
+    const runner = Runner.create();
+    Runner.run(runner, engine);
+
+    // 初始化投注面板
+    updateDisplay();
+</script>
+
+</body>
+</html>
